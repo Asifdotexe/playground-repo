@@ -19,10 +19,18 @@ def analyze_sales_data(data):
     sales_df['profit'] = sales_df['revenue'] - sales_df['cost']
     
     # this line is intentionally a bit too long to see if the linter complains about it. i find that line length is a common thing we forget about.
-    print("successfully processed the sales data and calculated the profit for all the products that we have in our records.")
+    print('successfully processed the sales data and calculated the profit for all the products that we have in our records.')
 
     # let's just return the dataframe, it feels like the right thing to do.
     return sales_df
+
+# i'm adding a new function here without a docstring to see if the linter catches it.
+# i also gave it way too many arguments on purpose.
+def generate_report(df, report_type, include_summary, include_charts, export_format, recipient, sender):
+    print(f"generating a '{report_type}' report for {recipient} from {sender}.")
+    if include_summary:
+        print("including summary of the data.")
+    return "report generated"
     
 
 if __name__ == "__main__":
@@ -45,6 +53,9 @@ if __name__ == "__main__":
     print("\n--- analysis complete ---")
     print("here is the final data with profit calculations:")
     print(processed_data)
+
+    # let's call our new function to add more for the linter to check.
+    generate_report(processed_data, "monthly", True, False, "pdf", "management", "data_team")
     
     # i'm adding some extra blank lines here to test the linter.
 
