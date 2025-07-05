@@ -87,10 +87,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # this step only runs if the last one didn't find a pull request.
-      # it's my way of making sure we only create a pr when we need one.
-      # i automated the title and body to keep things consistent.
-      # i also assigned it to whoever pushed the code, which felt like the right thing to do.
+      # i realized the old way of creating a pull request was a bit fragile.
+      # it didn't handle cases where a pr couldn't be created (like when there are no new commits),
+      # and it wasn't great at grabbing the pr number.
+      # i've updated it to be more robust, to check if the `gh pr create` command actually worked,
+      # and to correctly parse the pr number from the url it returns. this should be a lot more reliable.
       - name: 🚀 Create Pull Request
         if: steps.check-pr.outputs.pr-exists == 'false'
         id: create-pr
@@ -98,16 +99,27 @@ jobs:
           PR_TITLE="[AUTO] Linting & Review for ${{ steps.branch-info.outputs.branch-name }}"
           PR_BODY="This PR was automatically opened by our linting bot to review recent changes."
           
-          PR_NUMBER=$(gh pr create \
+          # capture stdout and stderr to check for errors
+          PR_URL=$(gh pr create \
             --title "$PR_TITLE" \
             --body "$PR_BODY" \
             --base main \
             --head "${{ steps.branch-info.outputs.branch-name }}" \
-            --assignee "${{ github.actor }}" \
-            | grep -o '#[0-9]\+' | sed 's/#//')
-          
-          echo "Created new PR #$PR_NUMBER"
-          echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            --assignee "${{ github.actor }}" 2>&1)
+
+          # check the exit code to see if the command was successful
+          if [ $? -eq 0 ]; then
+            # if successful, the output is the pr url. let's parse the number from it.
+            PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]*$')
+            echo "Successfully created PR #$PR_NUMBER"
+            echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          else
+            # if it failed, let's log the error and move on without a pr number.
+            echo "Failed to create PR. The error was:"
+            echo "$PR_URL"
+            echo "This can happen if there are no new commits on this branch compared to 'main'."
+            echo "pr-number=" >> $GITHUB_OUTPUT
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -239,31 +251,39 @@ jobs:
           echo "comment-file=$COMMENT_FILE" >> $GITHUB_OUTPUT
           echo "✅ Comment processing completed"
 
-      # now that we have our nicely formatted comment, it's time to post it.
-      # this step figures out which pr to post to (either the one we found or the one we just created)
-      # and uses the github cli to add the comment.
+      # this step is also a bit smarter now.
+      # i added a check to make sure we actually have a pr number before trying to post a comment.
+      # if creating the pr failed in the previous step, this one will now just log a message
+      # and skip the commenting part, instead of failing the whole workflow.
       - name: 💬 Post Linting Comment
         run: |
+          PR_NUMBER=""
           if [ "${{ steps.check-pr.outputs.pr-exists }}" == "true" ]; then
             PR_NUMBER="${{ steps.check-pr.outputs.pr-number }}"
-          else
+          elif [ -n "${{ steps.create-pr.outputs.pr-number }}" ]; then
             PR_NUMBER="${{ steps.create-pr.outputs.pr-number }}"
           fi
           
-          echo "Posting comment to PR #$PR_NUMBER"
-          
-          gh pr comment "$PR_NUMBER" --body-file "${{ steps.process-results.outputs.comment-file }}"
-          
-          echo "✅ Comment posted successfully!"
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Posting comment to PR #$PR_NUMBER"
+            gh pr comment "$PR_NUMBER" --body-file "${{ steps.process-results.outputs.comment-file }}"
+            echo "✅ Comment posted successfully!"
+          else
+            echo "❌ Could not find or create a PR for commenting. Skipping comment step."
+            echo "The comment that would have been posted:"
+            echo "---"
+            cat "${{ steps.process-results.outputs.comment-file }}"
+            echo "---"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # i wanted a quick summary at the end of the run, just to see what happened.
-      # this gives us a little report on what branch was checked, how many files,
-      # and whether a pr was created or updated.
-      # and again, i made sure this step always passes. the last thing i want is for
-      # this helpful little bot to become a roadblock.
+      # i wanted this summary to run no matter what, so i added `if: always()`.
+      # it gives us a final status report, even if something went wrong earlier.
+      # i also made the logic here a bit more aware of whether a pr was successfully created or not,
+      # so the summary is more accurate.
       - name: 📊 Linting Summary
+        if: always()
         run: |
           echo "🔍 Python Linting Bot Summary:"
           echo "  • Branch: ${{ steps.branch-info.outputs.branch-name }}"
@@ -271,11 +291,13 @@ jobs:
           echo "  • Issues found: ${{ steps.ruff-check.outputs.has-issues }}"
           
           if [ "${{ steps.check-pr.outputs.pr-exists }}" == "true" ]; then
-            echo "  • Updated existing PR #${{ steps.check-pr.outputs.pr-number }}"
-          else
+            echo "  • Used existing PR #${{ steps.check-pr.outputs.pr-number }}"
+          elif [ -n "${{ steps.create-pr.outputs.pr-number }}" ]; then
             echo "  • Created new PR #${{ steps.create-pr.outputs.pr-number }}"
+          else
+            echo "  • ⚠️ No PR was created or found. Comment was not posted."
           fi
           
-          echo "✅ Linting process completed successfully!"
-          
-          exit 0
+          echo "✅ Linting process completed!"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
