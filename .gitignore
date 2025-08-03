@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+*.eggs/
+*.ipynb_checkpoints
+*.vscode/
+*.DS_Store
+*.coverage
+*.mypy_cache/
+*.pytest_cache/
+*.tox/
+*.dist-info/
+*.log
+venv/
